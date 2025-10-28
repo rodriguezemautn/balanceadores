@@ -105,6 +105,7 @@ done
 ### 🧪 Lab 4.4: Least Connections (Concurrencia Dinámica)
 **Concepto:** Envía a backend con menos conexiones activas.
 **Config:** `nginx_least_conn.conf`
+**Install:** `sudo dnf install -y httpd-tools`
 **Prueba:**
 ```bash
 ab -n 60 -c 10 http://localhost:8080/
