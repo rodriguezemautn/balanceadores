@@ -1,145 +1,142 @@
+# 👨‍💻 Laboratorios de Balanceo de Carga con NGINX y HAProxy
 
-### `# UTN FRLP - Laboratorios de Balanceo de Carga (SRE)`
+Este repositorio está diseñado para la práctica de la materia Gestión Operativa y Seguridad en Redes (UTN FRLP), pero es aplicable a cualquier curso de SRE. El objetivo es implementar y comparar algoritmos de balanceo de carga estáticos (Round Robin, Weighted Round Robin, IP Hash) y dinámicos (Least Connections, Least Response Time) en un entorno de contenedores con Docker Compose. Usaremos tres backends web simples para simular un cluster de servidores, y dos balanceadores: NGINX (puerto 8080) y HAProxy (puerto 8081).
 
-Este repositorio contiene el entorno de práctica para la Sesión de Balanceo de Carga, implementando y comparando algoritmos estáticos y dinámicos en **NGINX** y **HAProxy**.
+**Competencias Desarrolladas:**
+- Diseño de sistemas distribuidos: Seleccionar y configurar algoritmos basados en necesidades (e.g., afinidad para sesiones, dinámica para cargas variables).
+- Implementación práctica: Usar Docker para deploy reproducible.
+- Monitoreo y troubleshooting: Analizar tráfico con curls, benchmarks (ab) y logs.
+- Resiliencia: Simular fallos/latencia para observar adaptabilidad.
+- Documentación: Registrar observaciones para informes profesionales.
 
-### 1\. Configuración del Entorno
+## 1. Prerrequisitos (VM Rocky Linux 9)
+Antes de comenzar, configura tu entorno base en una VM de Rocky Linux 9.
 
-Asegúrese de haber completado los pasos de instalación de Docker en su VM de Rocky Linux.
+### 1.1. Descarga e Inicialización de la VM
+1. Descarga la imagen de Rocky Linux 9 desde: https://www.linuxvmimages.com/images/rockylinux-9/
+2. Importa en VirtualBox/VMWare/KVM.
+3. Asegura acceso a internet (NAT/Bridged) y SSH.
 
-**Clonar el Repositorio:**
+### 1.2. Instalación de Docker y Docker Compose
+Ejecuta estos comandos en la VM:
 
 ```bash
-git clone https://github.com/tu-usuario/lb-sre-labs.git 
+# Eliminar versiones antiguas (si existen)
+sudo dnf remove docker docker-client docker-client-latest docker-common docker-latest docker-latest-logrotate docker-logrotate docker-selinux docker-engine-selinux docker-engine
+
+# Instalar herramientas necesarias
+sudo dnf -y install dnf-utils httpd-tools
+
+# Agregar repositorio de Docker
+sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+
+# Instalar Docker y Compose
+sudo dnf install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
+
+# Iniciar y habilitar Docker
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# Agregar usuario al grupo docker (cierra y abre sesión después)
+sudo usermod -aG docker $USER
+
+# Verificar
+docker --version
+docker compose version
+```
+
+### 1.3. Clonación del Repositorio
+```bash
+git clone https://github.com/tu-usuario/lb-sre-labs.git
 cd lb-sre-labs
 ```
 
-**Comandos Base:**
-
+## 2. Comandos Base para el Entorno
 | Comando | Descripción |
-| :--- | :--- |
-| `docker compose up -d` | Inicia todos los servicios (backends y balanceadores). |
-| `docker compose down` | Detiene y elimina todos los contenedores. **Usar después de cada práctica.** |
+|---------|-------------|
+| `docker compose up -d` | Inicia todos los servicios (backends, NGINX, HAProxy). |
+| `docker compose down` | Detiene y elimina todo. **Úsalo después de cada lab para resetear.** |
+| `curl -s localhost:8080` | Accede a NGINX (verifica con `| grep SERVER`). |
+| `curl -s localhost:8081` | Accede a HAProxy. |
+| `docker compose logs nginx` | Ve logs de NGINX (busca distribución con `| grep SERVER`). |
+| `docker compose logs haproxy` | Ve logs de HAProxy. |
 
-### 2\. Backends de Aplicación
+## 3. Descripción de los Backends
+Tres servidores web estáticos (web1, web2, web3) que responden con "SERVER N (WEBN)". Construidos con NGINX alpine para ligereza. No exponen puertos públicos; solo accesibles vía balanceadores.
 
-Todos los laboratorios usan tres servidores web (`web1`, `web2`, `web3`) que exponen el nombre del servidor para visualizar el balanceo.
-
-  * **Contenido:** `backends/webN/index.html` (Muestra **`SERVER N`**).
-  * **Servicio:** Definido en `docker-compose.yml`.
-
-### 3\. Laboratorios con NGINX (Puerto 8080)
-
-Para ejecutar cada laboratorio de NGINX, debe reemplazar el archivo de configuración activo:
-
+## 4. Laboratorios con NGINX (Puerto 8080)
+Para cada lab, copia la config de conf/ a nginx.conf y reinicia NGINX:
 ```bash
-# PASO 1: Reemplazar la configuración (ej: Round Robin)
-sudo cp conf/nginx_rr.conf ./nginx.conf
-
-# PASO 2: Reiniciar el contenedor NGINX para aplicar la nueva conf
+cp conf/[ARCHIVO].conf ./nginx.conf
 docker compose restart nginx
-
-# PASO 3: Ejecutar la prueba (usar el comando de prueba correspondiente)
 ```
 
-#### 🧪 Lab 3.1: Round Robin (RR)
-
-  * **Configuración:** `conf/nginx_rr.conf`
-  * **Prueba (Verificación Cíclica):**
-
-<!-- end list -->
-
+### 🧪 Lab 4.1: Round Robin (RR)
+**Concepto:** Distribución cíclica igualitaria (1→2→3→1...).
+**Config:** `nginx_rr.conf`
+**Prueba:**
 ```bash
 watch -n 0.5 "curl -s localhost:8080 | grep SERVER"
-# Verificación: El resultado debe ser 1 -> 2 -> 3 -> 1 -> ...
 ```
+**Verificación:** Ciclo secuencial. Analiza: ¿Es predecible? ¿Bueno para cargas uniformes?
 
-#### 🧪 Lab 3.2: Round Robin Ponderado (WRR)
-
-  * **Configuración:** `conf/nginx_rr_ponderado.conf`
-  * **Pesos:** `web1` (weight=3), `web2` (weight=1), `web3` (weight=1).
-  * **Prueba (Verificación de Pesos):**
-
-<!-- end list -->
-
+### 🧪 Lab 4.2: Round Robin Ponderado (WRR)
+**Concepto:** Distribución basada en pesos (web1=3, web2=1, web3=1; ~60% a web1).
+**Config:** `nginx_rr_ponderado.conf`
+**Prueba:**
 ```bash
 watch -n 0.5 "curl -s localhost:8080 | grep SERVER"
-# Verificación: De cada 5 peticiones, ~3 deben ir al SERVER 1.
 ```
+**Verificación:** Cuenta ~3/5 a SERVER 1. Analiza: Útil para servidores heterogéneos.
 
-#### 🧪 Lab 3.3: IP Hash (Afinidad de Sesión)
-
-  * **Configuración:** `conf/nginx_ip_hash.conf`
-  * **Prueba (Simulación de IPs):**
-    Utilizamos la cabecera `X-Forwarded-For` para simular diferentes IPs de cliente.
-
-<!-- end list -->
-
+### 🧪 Lab 4.3: IP Hash (Afinidad de Sesión)
+**Concepto:** Persistencia por IP cliente (mismo IP → mismo backend).
+**Config:** `nginx_ip_hash.conf`
+**Prueba:**
 ```bash
-echo "--- Prueba de Persistencia de Sesión (Hash por IP) ---"
+echo "--- Prueba de Afinidad ---"
 for ip in 1.1.1.1 8.8.8.8 4.4.4.4 1.1.1.1; do
-  echo -n "$ip -> "
+  echo -n "IP: $ip → "
   curl -s --header "X-Forwarded-For: $ip" localhost:8080 | grep SERVER
 done
-# Verificación: El IP 1.1.1.1 debe ser enrutado al mismo SERVER cada vez.
 ```
+**Verificación:** IP repetida → mismo SERVER. Analiza: Ideal para sesiones stateful.
 
-#### 🧪 Lab 3.4: Least Connections (Concurrencia Dinámica)
-
-  * **Configuración:** `conf/nginx_least_conn.conf`
-  * **Prueba (Simulación de Carga Pesada):**
-    Usaremos `ab` (Apache Benchmark - si no está instalado, `sudo dnf install httpd-tools -y`) para simular múltiples conexiones.
-
-<!-- end list -->
-
+### 🧪 Lab 4.4: Least Connections (Concurrencia Dinámica)
+**Concepto:** Envía a backend con menos conexiones activas.
+**Config:** `nginx_least_conn.conf`
+**Prueba:**
 ```bash
-# PASO 1: Ejecutar 60 peticiones concurrentes (C=10)
-# Esto estresará el balanceador, haciendo que Least Connections redistribuya.
 ab -n 60 -c 10 http://localhost:8080/
-
-# PASO 2: Revisar los logs del balanceador (para ver la distribución)
-docker compose logs nginx | grep "SERVER" 
-# La distribución de solicitudes mostrará que los servidores con menos carga activa recibieron más solicitudes.
+docker compose logs nginx | grep "SERVER"
 ```
+**Verificación:** Distribución adaptativa bajo carga. Analiza: Mejora rendimiento en concurrencia alta.
 
-### 4\. Laboratorio con HAProxy (Puerto 8081)
+## 5. Laboratorio con HAProxy (Puerto 8081)
+HAProxy usa Least Response Time por defecto (no requiere cambio de config).
 
-**Nota:** HAProxy está preconfigurado para usar el algoritmo Least Response Time.
-
-#### 🧪 Lab 4.1: Least Response Time (Latencia Dinámica)
-
-  * **Configuración:** `conf/haproxy_least_resp.cfg`
-  * **Prueba (Medición de Latencia):**
-    Simularemos que el `web3` es más lento (agregando un *delay* de 1 segundo en su `index.html`).
-
-<!-- end list -->
-
-1.  **Hacer Lento el `web3` (Ejemplo avanzado):**
-
-    ```bash
-    # Agregar un delay de 1 segundo solo a web3 (para simular baja performance)
-    echo '<p>SERVER 3 (DELAYED)</p>' > backends/web3/index.html
-    docker compose restart web3
-    ```
-
-2.  **Prueba de Balanceo (Verificación de Distribución):**
-
-    ```bash
-    watch -n 0.5 "curl -s localhost:8081 | grep SERVER"
-    # Verificación: HAProxy enviará la mayoría del tráfico a web1 y web2, priorizando el menor tiempo de respuesta, hasta que la carga se iguale.
-    ```
-
-3.  **Restaurar `web3`:**
-
-    ```bash
-    echo '<p>SERVER 3 (WEB3)</p>' > backends/web3/index.html
-    docker compose restart web3
-    ```
-
-### 5\. Finalización del Laboratorio
-
-**Recuerde siempre detener el entorno de contenedores al finalizar:**
-
+### 🧪 Lab 5.1: Least Response Time (Latencia Dinámica)
+**Concepto:** Selecciona backend con menor tiempo de respuesta promedio.
+**Prueba Inicial:**
 ```bash
-docker compose down
+watch -n 0.5 "curl -s localhost:8081 | grep SERVER"
 ```
+**Simular Latencia (en web3):**
+```bash
+# Edita index.html para simular delay (agrega sleep si usas un server dinámico; aquí aproximamos reiniciando)
+echo '<h1>SERVER 3 (DELAYED)</h1><script>for(let i=0;i<1e9;i++);</script>' > backends/web3/index.html
+docker compose restart web3
+watch -n 0.5 "curl -s localhost:8081 | grep SERVER"
+ab -n 60 -c 10 http://localhost:8081/
+```
+**Restaurar:**
+```bash
+echo '<h1>Respuesta desde: SERVER 3 (WEB3)</h1><p>Algoritmo de balanceo de carga en acción.</p>' > backends/web3/index.html
+docker compose restart web3
+```
+**Verificación:** Menos tráfico a web3 lento. Analiza: Optimiza SLOs de latencia.
+
+## 6. Finalización y Evaluación
+- Detén siempre con `docker compose down`.
+- **Tarea:** Registra observaciones en un informe (e.g., pros/contras de cada algoritmo, métricas de ab). ¿Cómo escalarías esto a producción (e.g., con Kubernetes)?
+- **Extensión Avanzada:** Integra monitoreo con Prometheus o agrega health checks.
